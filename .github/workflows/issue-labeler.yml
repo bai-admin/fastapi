@@ -1,0 +1,41 @@
+name: Issue Labeler
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  label_issues:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Label issues based on content
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          # Function to add a label if it matches
+          add_label_if_matches() {
+            local pattern=$1
+            local label=$2
+            if echo "$ISSUE_BODY" | grep -iE "$pattern" > /dev/null; then
+              gh issue edit "$ISSUE_NUMBER" --add-label "$label"
+            fi
+          }
+          
+          # Check for infrastructure-related content
+          add_label_if_matches "directory|structure|path|monorepo|repository" "infrastructure"
+          
+          # Check for configuration-related content
+          add_label_if_matches "config|railway\.json|environment|variable|setting" "configuration"
+          
+          # Check for maintenance-related content
+          add_label_if_matches "cleanup|remove|update|audit|verify" "maintenance"
+          
+          # Check for documentation-related content
+          add_label_if_matches "document|readme|guide|instruction|comment" "documentation"
+          
+          # Check for high-priority indicators
+          add_label_if_matches "urgent|critical|blocker|high.priority|asap" "high-priority" 

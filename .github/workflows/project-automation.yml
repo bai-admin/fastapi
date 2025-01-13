@@ -1,0 +1,115 @@
+name: Project Automation
+
+on:
+  issues:
+    types: [assigned, closed]
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  update_project_on_assign:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'assigned'
+    steps:
+      - name: Move issue to In Progress
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_ID: ${{ github.event.issue.node_id }}
+          PROJECT_ID: PVT_kwHOCoGPqc4AvyCq
+          STATUS_FIELD_ID: PVTSSF_lAHOCoGPqc4AvyCqzgmKAPo
+          IN_PROGRESS_OPTION_ID: 0ca7f140
+        run: |
+          gh api graphql -f query='
+            mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) {
+              updateProjectV2ItemFieldValue(
+                input: {
+                  projectId: $project
+                  itemId: $item
+                  fieldId: $field
+                  value: { 
+                    singleSelectOptionId: $option
+                  }
+                }
+              ) {
+                projectV2Item {
+                  id
+                }
+              }
+            }' -f project=$PROJECT_ID -f item=$ISSUE_ID -f field=$STATUS_FIELD_ID -f option=$IN_PROGRESS_OPTION_ID
+
+  update_project_on_pr:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action == 'ready_for_review'
+    steps:
+      - name: Move linked issues to Review/QA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_ID: ${{ github.event.pull_request.node_id }}
+          PROJECT_ID: PVT_kwHOCoGPqc4AvyCq
+          STATUS_FIELD_ID: PVTSSF_lAHOCoGPqc4AvyCqzgmKAPo
+          REVIEW_OPTION_ID: 721f0cd1
+        run: |
+          # Get linked issues
+          LINKED_ISSUES=$(gh api graphql -f query='
+            query($pr:ID!) {
+              node(id: $pr) {
+                ... on PullRequest {
+                  closingIssuesReferences(first: 10) {
+                    nodes {
+                      id
+                    }
+                  }
+                }
+              }
+            }' -f pr=$PR_ID)
+          
+          # Update each linked issue
+          for ISSUE_ID in $(echo "$LINKED_ISSUES" | jq -r '.data.node.closingIssuesReferences.nodes[].id'); do
+            gh api graphql -f query='
+              mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) {
+                updateProjectV2ItemFieldValue(
+                  input: {
+                    projectId: $project
+                    itemId: $item
+                    fieldId: $field
+                    value: { 
+                      singleSelectOptionId: $option
+                    }
+                  }
+                ) {
+                  projectV2Item {
+                    id
+                  }
+                }
+              }' -f project=$PROJECT_ID -f item=$ISSUE_ID -f field=$STATUS_FIELD_ID -f option=$REVIEW_OPTION_ID
+          done
+
+  update_project_on_close:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'closed'
+    steps:
+      - name: Move issue to Done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_ID: ${{ github.event.issue.node_id }}
+          PROJECT_ID: PVT_kwHOCoGPqc4AvyCq
+          STATUS_FIELD_ID: PVTSSF_lAHOCoGPqc4AvyCqzgmKAPo
+          DONE_OPTION_ID: c05efd53
+        run: |
+          gh api graphql -f query='
+            mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) {
+              updateProjectV2ItemFieldValue(
+                input: {
+                  projectId: $project
+                  itemId: $item
+                  fieldId: $field
+                  value: { 
+                    singleSelectOptionId: $option
+                  }
+                }
+              ) {
+                projectV2Item {
+                  id
+                }
+              }
+            }' -f project=$PROJECT_ID -f item=$ISSUE_ID -f field=$STATUS_FIELD_ID -f option=$DONE_OPTION_ID 

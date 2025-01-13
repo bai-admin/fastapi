@@ -1,0 +1,41 @@
+name: Issue Assigner
+
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  assign_issues:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Assign issues based on labels and content
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_LABELS: ${{ toJson(github.event.issue.labels) }}
+        run: |
+          # Function to assign issue if it matches criteria
+          assign_if_matches() {
+            local pattern=$1
+            local assignee=$2
+            if echo "$ISSUE_BODY" | grep -iE "$pattern" > /dev/null || echo "$ISSUE_LABELS" | grep -iE "$pattern" > /dev/null; then
+              gh issue edit "$ISSUE_NUMBER" --add-assignee "$assignee"
+            fi
+          }
+          
+          # Assign infrastructure and configuration issues
+          assign_if_matches "infrastructure|configuration|railway\.json" "bai-admin"
+          
+          # Assign documentation issues
+          assign_if_matches "documentation|readme|guide" "bai-admin"
+          
+          # Assign maintenance issues
+          assign_if_matches "maintenance|cleanup|audit" "bai-admin"
+          
+          # Always assign high-priority issues to the team lead
+          if echo "$ISSUE_LABELS" | grep -i "high-priority" > /dev/null; then
+            gh issue edit "$ISSUE_NUMBER" --add-assignee "bai-admin"
+          fi 
