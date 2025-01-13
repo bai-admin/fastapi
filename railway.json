@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "hypercorn fastapi.main:app --bind \"[::]:$PORT\"",
+    "startCommand": "PYTHONPATH=/app hypercorn main:app --bind \"[::]:$PORT\"",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
