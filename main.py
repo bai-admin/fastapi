@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, Response, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse
 from app.services.o365_service import O365Service, O365Config
-from config import Settings, get_settings
+from app.config import Settings, get_settings
 from typing import Annotated, Optional
 from functools import lru_cache
 import os
