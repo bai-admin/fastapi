@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, Tuple, List, Union
+from typing import Optional, Dict, Any, Tuple, List, Union, cast
 import os
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -243,7 +243,7 @@ class O365Service:
             )
             
             if response.status_code == 201:
-                subscription = response.json()
+                subscription = cast(Dict[str, Any], response.json())
                 self.subscription_backend.save_subscription(subscription)
                 logger.info("Successfully created and stored new subscription")
                 return subscription
@@ -281,7 +281,7 @@ class O365Service:
             )
             
             if response.status_code == 200:
-                subscription = response.json()
+                subscription = cast(Dict[str, Any], response.json())
                 self.subscription_backend.save_subscription(subscription)
                 logger.info(f"Successfully renewed subscription {subscription_id}")
                 return subscription
@@ -329,7 +329,7 @@ class O365Service:
             )
             
             if response.status_code == 200:
-                message_data = response.json()
+                message_data = cast(Dict[str, Any], response.json())
                 logger.info(f"Retrieved details for message {message_id}")
                 return message_data
             else:

@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 import os
 import logging
+from typing import Any, Dict, Optional
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +26,8 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = False
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
+        """Initialize settings with environment variables and Railway configuration."""
         super().__init__(**kwargs)
         
         # Set base URL based on environment

@@ -5,7 +5,7 @@ import json
 import logging
 import requests
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, NoReturn
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def get_railway_variables() -> Dict[str, str]:
             data = response.json()
             variables = data.get('data', {}).get('variables', {}).get('edges', [])
             return {
-                edge['node']['name']: edge['node']['value']
+                str(edge['node']['name']): str(edge['node']['value'])
                 for edge in variables
             }
         else:
@@ -84,7 +84,7 @@ def cleanup_subscriptions() -> None:
     except Exception as e:
         logger.error(f"Error cleaning up subscriptions: {str(e)}")
 
-def run_server() -> None:
+def run_server() -> NoReturn:
     """Run the development server."""
     try:
         import uvicorn
@@ -106,6 +106,9 @@ def run_server() -> None:
             port=8000,
             reload=True
         )
+        
+        # If uvicorn exits normally (which it shouldn't), exit the process
+        sys.exit(0)
         
     except Exception as e:
         logger.error(f"Error running server: {str(e)}")
