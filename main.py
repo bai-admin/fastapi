@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Depends, HTTPException, Response, Backgrou
 from fastapi.responses import JSONResponse, RedirectResponse
 from app.services.o365_service import O365Service, O365Config
 from app.config import Settings, get_settings
-from typing import Annotated, Optional, Dict, Any, AsyncGenerator
+from typing import Annotated, Optional, Dict, Any, AsyncGenerator, Union
 from functools import lru_cache
 import os
 import json
@@ -130,7 +130,7 @@ def get_o365_service(settings: Annotated[Settings, Depends(get_settings)]) -> O3
 @app.get("/search/messages")
 async def search_messages_endpoint(
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-) -> JSONResponse:
+) -> Union[JSONResponse, RedirectResponse]:
     """
     Search for recent messages in O365 mailbox.
     If not authenticated, redirects to Microsoft login.
@@ -195,7 +195,7 @@ async def handle_webhook(
     response: Response,
     background_tasks: BackgroundTasks,
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-) -> Dict[str, str]:
+) -> Union[str, Dict[str, str]]:
     """Handle incoming webhook notifications from Microsoft Graph."""
     try:
         # Get the raw request body
