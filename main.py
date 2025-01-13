@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Depends, HTTPException, Response, Backgrou
 from fastapi.responses import JSONResponse, RedirectResponse
 from app.services.o365_service import O365Service, O365Config
 from app.config import Settings, get_settings
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Dict, Any, AsyncGenerator
 from functools import lru_cache
 import os
 import json
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 subscription_check_task = None
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Lifecycle manager for FastAPI application."""
     # Start background tasks
     global subscription_check_task
@@ -58,7 +58,7 @@ app = FastAPI(lifespan=lifespan)
 LOGS_DIR = Path("logs")
 LOGS_DIR.mkdir(exist_ok=True)
 
-async def periodic_subscription_check():
+async def periodic_subscription_check() -> None:
     """Background task that periodically checks and renews subscriptions."""
     while True:
         try:
@@ -82,7 +82,7 @@ async def periodic_subscription_check():
         # Check every hour
         await asyncio.sleep(3600)  # 1 hour
 
-def save_notification_to_file(notification: dict):
+def save_notification_to_file(notification: Dict[str, Any]) -> None:
     """Save a webhook notification to a file with timestamp and message details."""
     timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
     notification_file = LOGS_DIR / f"notification_{timestamp}.json"
@@ -100,7 +100,7 @@ def save_notification_to_file(notification: dict):
     except Exception as e:
         logger.error(f"Failed to save notification to file: {str(e)}")
 
-async def check_and_renew_subscription(o365_service: O365Service):
+async def check_and_renew_subscription(o365_service: O365Service) -> None:
     """Background task to check subscription status and renew if needed."""
     try:
         if o365_service.should_renew_subscription():
@@ -111,7 +111,7 @@ async def check_and_renew_subscription(o365_service: O365Service):
         logger.error(f"Failed to renew subscription: {str(e)}")
 
 @app.on_event("startup")
-async def startup_event():
+async def startup_event() -> None:
     """Run when the FastAPI app starts up."""
     logger.info("Starting up FastAPI application")
     LOGS_DIR.mkdir(exist_ok=True)
@@ -130,7 +130,7 @@ def get_o365_service(settings: Annotated[Settings, Depends(get_settings)]) -> O3
 @app.get("/search/messages")
 async def search_messages_endpoint(
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-):
+) -> JSONResponse:
     """
     Search for recent messages in O365 mailbox.
     If not authenticated, redirects to Microsoft login.
@@ -160,7 +160,7 @@ async def search_messages_endpoint(
 async def auth_callback(
     request: Request,
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-):
+) -> RedirectResponse:
     """
     OAuth callback endpoint that Microsoft redirects to after user login.
     The URL will contain an authorization code that we exchange for an access token.
@@ -195,7 +195,7 @@ async def handle_webhook(
     response: Response,
     background_tasks: BackgroundTasks,
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-):
+) -> Dict[str, str]:
     """Handle incoming webhook notifications from Microsoft Graph."""
     try:
         # Get the raw request body
@@ -273,7 +273,7 @@ async def handle_webhook(
 @app.post("/subscriptions/create")
 async def create_subscription(
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-):
+) -> Dict[str, Any]:
     """Create a new subscription for inbox messages."""
     try:
         if not o365_service.is_authenticated():
@@ -288,7 +288,7 @@ async def create_subscription(
 @app.post("/subscriptions/renew")
 async def renew_subscription(
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-):
+) -> Dict[str, Any]:
     """Renew the current subscription."""
     try:
         if not o365_service.is_authenticated():
@@ -303,14 +303,14 @@ async def renew_subscription(
 @app.delete("/subscriptions/delete")
 async def delete_subscription(
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-):
+) -> Dict[str, str]:
     """Delete the current subscription."""
     try:
         if not o365_service.is_authenticated():
             raise HTTPException(status_code=401, detail="Authentication required")
             
         success = o365_service.delete_subscription()
-        return {"success": success}
+        return {"success": str(success)}
     except Exception as e:
         logger.error(f"Error deleting subscription: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -318,7 +318,7 @@ async def delete_subscription(
 @app.get("/subscriptions/current")
 async def get_subscription(
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-):
+) -> Dict[str, Any]:
     """Get the current subscription if it exists."""
     try:
         if not o365_service.is_authenticated():
