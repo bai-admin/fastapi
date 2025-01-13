@@ -1,117 +1,134 @@
-import json
+from typing import Dict, Any, Optional, cast
 import os
-from typing import Optional
+import json
+import logging
 import requests
-from O365.utils.token import BaseTokenBackend, Token
+from O365.utils.token import BaseTokenBackend  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 class RailwayTokenBackend(BaseTokenBackend):
-    """Token backend that stores tokens in Railway environment variables via GraphQL API."""
-    
-    def __init__(self, token_path: str = None):
-        """Initialize the backend.
+    """Token backend that stores tokens in Railway variables."""
+
+    def __init__(self, token_path: Optional[str] = None) -> None:
+        """Initialize the token backend.
         
         Args:
-            token_path: Ignored, kept for compatibility with BaseTokenBackend
+            token_path: Ignored, included for compatibility with base class.
         """
-        super().__init__()
-        self.api_token = os.getenv('RAILWAY_API_TOKEN')
-        if not self.api_token:
-            raise ValueError('RAILWAY_API_TOKEN environment variable is required')
-            
-        self.project_id = os.getenv('RAILWAY_PROJECT_ID')
-        self.environment_id = os.getenv('RAILWAY_ENVIRONMENT_ID')
+        super().__init__(token_path=token_path or '')
         self.service_id = os.getenv('RAILWAY_SERVICE_ID')
+        self.project_id = os.getenv('RAILWAY_PROJECT_ID')
+        self.environment = os.getenv('RAILWAY_ENVIRONMENT_NAME')
+        self.api_token = os.getenv('RAILWAY_API_TOKEN')
         
-        if not all([self.project_id, self.environment_id, self.service_id]):
-            raise ValueError('Missing required Railway environment variables')
+        if not all([self.service_id, self.project_id, self.environment, self.api_token]):
+            raise ValueError("Missing required Railway environment variables")
             
-        self.api_url = 'https://backboard.railway.app/graphql/v2'
-        
-    def _get_headers(self) -> dict:
-        """Get headers for Railway API requests."""
-        return {
+        self.headers = {
             'Authorization': f'Bearer {self.api_token}',
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/json'
         }
         
-    def _variable_upsert(self, key: str, value: str):
-        """Upsert a variable in Railway."""
-        mutation = """
-        mutation variableUpsert($input: VariableUpsertInput!) {
-            variableUpsert(input: $input)
-        }
-        """
-        
-        variables = {
-            "input": {
-                "name": key,
-                "value": value,
-                "environmentId": self.environment_id,
-                "projectId": self.project_id,
-                "serviceId": self.service_id
+    def _get_variable(self, name: str) -> Optional[str]:
+        """Get a Railway variable value."""
+        url = 'https://backboard.railway.app/graphql/v2'
+        query = '''
+        query ($serviceId: String!, $name: String!) {
+          variables(serviceId: $serviceId) {
+            edges {
+              node {
+                name
+                value
+              }
             }
+          }
         }
+        '''
         
-        response = requests.post(
-            self.api_url,
-            headers=self._get_headers(),
-            json={"query": mutation, "variables": variables}
-        )
-        response.raise_for_status()
-        
-    def _get_variables(self) -> dict:
-        """Get variables from Railway."""
-        query = """
-        query variables($environmentId: String!, $projectId: String!, $serviceId: String!) {
-            variables(
-                environmentId: $environmentId
-                projectId: $projectId
-                serviceId: $serviceId
-            )
-        }
-        """
-        
-        variables = {
-            "environmentId": self.environment_id,
-            "projectId": self.project_id,
-            "serviceId": self.service_id
-        }
-        
-        response = requests.post(
-            self.api_url,
-            headers=self._get_headers(),
-            json={"query": query, "variables": variables}
-        )
-        response.raise_for_status()
-        return response.json().get('data', {}).get('variables', {})
-
-    def load_token(self) -> Optional[Token]:
-        """Load token from Railway environment variables."""
-        variables = self._get_variables()
-        token_data = variables.get('O365_TOKEN')
-        
-        if not token_data:
-            return None
-            
         try:
-            token_dict = json.loads(token_data)
-            return Token(token_dict)
-        except (json.JSONDecodeError, KeyError):
+            response = requests.post(
+                url,
+                headers=self.headers,
+                json={
+                    'query': query,
+                    'variables': {
+                        'serviceId': self.service_id,
+                        'name': name
+                    }
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                variables = data.get('data', {}).get('variables', {}).get('edges', [])
+                for edge in variables:
+                    node = edge.get('node', {})
+                    if node.get('name') == name:
+                        return node.get('value')
             return None
             
-    def save_token(self, token: Token):
-        """Save token to Railway environment variables."""
-        if not isinstance(token, Token):
-            raise ValueError('token must be an instance of Token')
+        except Exception as e:
+            logger.error(f"Error getting Railway variable {name}: {str(e)}")
+            return None
             
-        token_data = json.dumps(dict(token))
-        self._variable_upsert('O365_TOKEN', token_data)
+    def _set_variable(self, name: str, value: str) -> bool:
+        """Set a Railway variable value."""
+        url = 'https://backboard.railway.app/graphql/v2'
+        mutation = '''
+        mutation ($serviceId: String!, $name: String!, $value: String!) {
+          variableCreate(
+            input: {
+              serviceId: $serviceId
+              name: $name
+              value: $value
+            }
+          ) {
+            id
+          }
+        }
+        '''
         
-    def delete_token(self):
-        """Delete token from Railway environment variables."""
-        self._variable_upsert('O365_TOKEN', '')  # Railway API doesn't support deletion, so we set to empty
+        try:
+            response = requests.post(
+                url,
+                headers=self.headers,
+                json={
+                    'query': mutation,
+                    'variables': {
+                        'serviceId': self.service_id,
+                        'name': name,
+                        'value': value
+                    }
+                }
+            )
+            
+            return response.status_code == 200
+            
+        except Exception as e:
+            logger.error(f"Error setting Railway variable {name}: {str(e)}")
+            return False
+            
+    def load_token(self) -> Dict[str, Any]:
+        """Load the token from Railway variables."""
+        token_str = self._get_variable('O365_TOKEN')
+        if token_str:
+            try:
+                return cast(Dict[str, Any], json.loads(token_str))
+            except json.JSONDecodeError:
+                logger.error("Failed to decode token JSON from Railway variable")
+        return {}
         
-    def check_token(self) -> bool:
-        """Check if token exists in Railway environment variables."""
-        variables = self._get_variables()
-        return 'O365_TOKEN' in variables 
+    def save_token(self, token: Dict[str, Any]) -> bool:
+        """Save the token to Railway variables."""
+        try:
+            token_str = json.dumps(token)
+            return self._set_variable('O365_TOKEN', token_str)
+        except Exception as e:
+            logger.error(f"Error saving token to Railway: {str(e)}")
+            return False
+            
+    def delete_token(self) -> None:
+        """Delete the token from Railway variables."""
+        # Set to empty string since Railway doesn't have a delete API
+        self._set_variable('O365_TOKEN', '') 
