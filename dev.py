@@ -1,76 +1,115 @@
 #!/usr/bin/env python3
-import subprocess
+import os
 import sys
-import time
-import signal
+import json
+import logging
 import requests
-import atexit
 from pathlib import Path
+from typing import Dict, Any, Optional, List
 
-def check_subscriptions():
-    """Check for existing subscriptions"""
-    try:
-        response = requests.get('http://localhost:8000/subscriptions/current')
-        if response.status_code == 200:
-            print("Found existing subscription:", response.json())
-            return True
-        return False
-    except requests.exceptions.ConnectionError:
-        return False
+logger = logging.getLogger(__name__)
 
-def cleanup_subscriptions():
-    """Cleanup any existing subscriptions"""
+def get_railway_variables() -> Dict[str, str]:
+    """Get variables from Railway environment."""
+    url = 'https://backboard.railway.app/graphql/v2'
+    query = '''
+    query ($serviceId: String!) {
+      variables(serviceId: $serviceId) {
+        edges {
+          node {
+            name
+            value
+          }
+        }
+      }
+    }
+    '''
+    
     try:
-        response = requests.delete('http://localhost:8000/subscriptions/delete')
+        api_token = os.getenv('RAILWAY_API_TOKEN')
+        service_id = os.getenv('RAILWAY_SERVICE_ID')
+        
+        if not api_token or not service_id:
+            logger.error("Missing required Railway environment variables")
+            return {}
+            
+        response = requests.post(
+            url,
+            headers={
+                'Authorization': f'Bearer {api_token}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'query': query,
+                'variables': {
+                    'serviceId': service_id
+                }
+            }
+        )
+        
         if response.status_code == 200:
-            print("Successfully cleaned up subscriptions")
+            data = response.json()
+            variables = data.get('data', {}).get('variables', {}).get('edges', [])
+            return {
+                edge['node']['name']: edge['node']['value']
+                for edge in variables
+            }
         else:
-            print("No subscriptions to clean up")
-    except requests.exceptions.ConnectionError:
-        print("Server not running, no subscriptions to clean up")
+            logger.error(f"Failed to get Railway variables: {response.text}")
+            return {}
+            
+    except Exception as e:
+        logger.error(f"Error getting Railway variables: {str(e)}")
+        return {}
 
-def run_server():
-    """Run the uvicorn development server"""
-    # Register cleanup function
-    atexit.register(cleanup_subscriptions)
-    
-    # Start the server
-    server_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "fastapi.main:app", "--reload", "--port", "8000"],
-        cwd=Path(__file__).parent.parent
-    )
-    
-    # Handle Ctrl+C gracefully
-    def signal_handler(signum, frame):
-        print("\nShutting down server...")
-        cleanup_subscriptions()
-        server_process.terminate()
-        sys.exit(0)
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Wait for server to start
-    print("Starting development server...")
-    max_retries = 30
-    for i in range(max_retries):
-        try:
-            requests.get('http://localhost:8000/docs')
-            print("Server is ready!")
-            break
-        except requests.exceptions.ConnectionError:
-            if i == max_retries - 1:
-                print("Server failed to start")
-                sys.exit(1)
-            time.sleep(1)
-    
+def cleanup_subscriptions() -> None:
+    """Clean up any existing subscriptions."""
     try:
-        server_process.wait()
-    except KeyboardInterrupt:
-        print("\nShutting down server...")
-        cleanup_subscriptions()
-        server_process.terminate()
-        sys.exit(0)
+        from main import get_settings, get_o365_service
+        
+        settings = get_settings()
+        o365_service = get_o365_service(settings)
+        
+        if o365_service.is_authenticated():
+            subscription = o365_service.get_subscription()
+            if subscription:
+                logger.info("Found existing subscription, deleting...")
+                o365_service.delete_subscription()
+                logger.info("Successfully deleted subscription")
+            else:
+                logger.info("No existing subscription found")
+        else:
+            logger.warning("Not authenticated, skipping subscription cleanup")
+            
+    except Exception as e:
+        logger.error(f"Error cleaning up subscriptions: {str(e)}")
 
-if __name__ == "__main__":
+def run_server() -> None:
+    """Run the development server."""
+    try:
+        import uvicorn
+        
+        # Get Railway variables
+        railway_vars = get_railway_variables()
+        
+        # Set environment variables
+        for key, value in railway_vars.items():
+            os.environ[key] = value
+            
+        # Clean up any existing subscriptions
+        cleanup_subscriptions()
+        
+        # Run the server
+        uvicorn.run(
+            "main:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=True
+        )
+        
+    except Exception as e:
+        logger.error(f"Error running server: {str(e)}")
+        sys.exit(1)
+
+if __name__ == '__main__':
     run_server() 
