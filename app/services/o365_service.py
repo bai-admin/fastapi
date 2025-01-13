@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List, Union
 import os
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -8,8 +8,8 @@ import hashlib
 import base64
 from pathlib import Path
 import logging
-from O365 import Account
-from O365.utils.token import FileSystemTokenBackend
+from O365 import Account  # type: ignore
+from O365.utils.token import FileSystemTokenBackend  # type: ignore
 from .railway_token_backend import RailwayTokenBackend
 from .subscription_backend import BaseSubscriptionBackend, FileSystemSubscriptionBackend, RailwaySubscriptionBackend
 
@@ -23,7 +23,7 @@ class O365Config:
     client_secret: str
     tenant_id: str
     base_url: str
-    scopes: list[str] = None
+    scopes: List[str] = None  # type: ignore
     auth_flow_type: str = 'authorization'
     environment: str = 'local'
 
@@ -34,7 +34,7 @@ class O365Config:
         
         # Get base URL from Railway if available, otherwise use local
         if environment != 'local':
-            base_url = f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN')}"
+            base_url = f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN', '')}"
             logger.info(f"Using Railway domain for {environment} environment: {base_url}")
         else:
             base_url = os.getenv('APP_BASE_URL', 'http://localhost:8000')
@@ -44,9 +44,9 @@ class O365Config:
         scopes = ['offline_access', 'Mail.Read', 'Mail.ReadWrite']
 
         config = cls(
-            client_id=os.getenv('AZURE_CLIENT_ID'),
-            client_secret=os.getenv('AZURE_CLIENT_SECRET'),
-            tenant_id=os.getenv('AZURE_TENANT_ID'),
+            client_id=os.getenv('AZURE_CLIENT_ID', ''),
+            client_secret=os.getenv('AZURE_CLIENT_SECRET', ''),
+            tenant_id=os.getenv('AZURE_TENANT_ID', ''),
             base_url=base_url,
             scopes=scopes,
             environment=environment
@@ -70,21 +70,21 @@ class O365Config:
 class O365Service:
     """Service for interacting with Office 365."""
 
-    def __init__(self, config: Optional[O365Config] = None):
+    def __init__(self, config: Optional[O365Config] = None) -> None:
         """Initialize the service with optional config."""
         self.config = config or O365Config.from_env()
         
         # Set up token backend based on environment
         if self.config.environment != 'local':
             self.token_backend = RailwayTokenBackend()
-            self.subscription_backend = RailwaySubscriptionBackend()
+            self.subscription_backend: BaseSubscriptionBackend = RailwaySubscriptionBackend()
         else:
             token_path = Path.home() / '.o365' / 'token.txt'
             self.token_backend = FileSystemTokenBackend(token_path=str(token_path))
             self.subscription_backend = FileSystemSubscriptionBackend()
             
-        self._account = None
-        self._code_verifier = None
+        self._account: Optional[Account] = None
+        self._code_verifier: Optional[str] = None
 
     def _generate_code_verifier(self) -> str:
         """Generate a code verifier for PKCE."""
@@ -162,12 +162,12 @@ class O365Service:
         """Check if the service is authenticated."""
         return bool(self.token_backend.check_token())
         
-    def get_token(self) -> Optional[dict]:
+    def get_token(self) -> Optional[Dict[str, Any]]:
         """Get the current token if it exists."""
         token = self.token_backend.load_token()
         return dict(token) if token else None
 
-    def search_recent_messages(self, days: int = 30, limit: int = 10) -> list[Dict[str, Any]]:
+    def search_recent_messages(self, days: int = 30, limit: int = 10) -> List[Dict[str, Any]]:
         """Search for recent messages."""
         try:
             if not self.account.is_authenticated:
@@ -194,7 +194,7 @@ class O365Service:
             self._log_error("Error searching messages", e)
             return []
 
-    def _log_error(self, message: str, error: Exception):
+    def _log_error(self, message: str, error: Exception) -> None:
         """Log errors with timestamp and environment context."""
         logger.error(f"[{self.config.environment}] {message}: {str(error)}")
         
@@ -206,17 +206,10 @@ class O365Service:
             with open(log_file, 'a') as f:
                 f.write(f'[{timestamp}] {message}: {str(error)}\n')
         except Exception as e:
-            logger.error(f"Failed to write to log file {log_file}: {str(e)}") 
+            logger.error(f"Failed to write to log file {log_file}: {str(e)}")
 
     def create_subscription(self, expiration_days: int = 7) -> Dict[str, Any]:
-        """Create a new subscription for inbox messages.
-        
-        Args:
-            expiration_days: Number of days until subscription expires (max 7)
-            
-        Returns:
-            Dict containing subscription details
-        """
+        """Create a new subscription for inbox messages."""
         if not self.is_authenticated():
             raise ValueError("Authentication required before creating subscription")
             
@@ -267,15 +260,7 @@ class O365Service:
         
     def renew_subscription(self, subscription_id: Optional[str] = None, 
                          expiration_days: int = 7) -> Dict[str, Any]:
-        """Renew an existing subscription.
-        
-        Args:
-            subscription_id: ID of subscription to renew. If None, uses stored subscription
-            expiration_days: Number of days to extend subscription (max 7)
-            
-        Returns:
-            Dict containing updated subscription details
-        """
+        """Renew an existing subscription."""
         if subscription_id is None:
             stored = self.subscription_backend.get_subscription()
             if not stored or 'id' not in stored:
@@ -308,14 +293,7 @@ class O365Service:
             raise
             
     def delete_subscription(self, subscription_id: Optional[str] = None) -> bool:
-        """Delete a subscription.
-        
-        Args:
-            subscription_id: ID of subscription to delete. If None, uses stored subscription
-            
-        Returns:
-            True if successful
-        """
+        """Delete a subscription."""
         if subscription_id is None:
             stored = self.subscription_backend.get_subscription()
             if not stored or 'id' not in stored:
@@ -363,12 +341,7 @@ class O365Service:
             return None
 
     def check_subscription_expiration(self) -> Optional[timedelta]:
-        """Check how long until the current subscription expires.
-        
-        Returns:
-            timedelta until expiration if subscription exists and is valid,
-            None if no subscription or already expired
-        """
+        """Check how long until the current subscription expires."""
         subscription = self.subscription_backend.get_subscription()
         if not subscription or 'expirationDateTime' not in subscription:
             return None
@@ -386,14 +359,7 @@ class O365Service:
             return None
             
     def should_renew_subscription(self, renewal_threshold: timedelta = timedelta(days=1)) -> bool:
-        """Check if subscription should be renewed based on expiration time.
-        
-        Args:
-            renewal_threshold: How long before expiration to trigger renewal
-            
-        Returns:
-            True if subscription exists and should be renewed
-        """
+        """Check if subscription should be renewed based on expiration time."""
         time_remaining = self.check_subscription_expiration()
         if not time_remaining:
             return False
@@ -401,17 +367,7 @@ class O365Service:
         return time_remaining <= renewal_threshold
         
     def ensure_subscription(self, notification_url: Optional[str] = None) -> Dict[str, Any]:
-        """Ensure a valid subscription exists, creating or renewing as needed.
-        
-        Args:
-            notification_url: URL for webhook notifications. Required for new subscriptions.
-            
-        Returns:
-            Dict containing subscription details
-            
-        Raises:
-            ValueError if subscription needs to be created but no URL provided
-        """
+        """Ensure a valid subscription exists, creating or renewing as needed."""
         current = self.subscription_backend.get_subscription()
         
         # If no subscription exists, create new one
@@ -434,15 +390,7 @@ class O365Service:
         return current
         
     def handle_lifecycle_event(self, lifecycle_event: Dict[str, Any]) -> None:
-        """Handle subscription lifecycle events from Microsoft Graph.
-        
-        Args:
-            lifecycle_event: The lifecycle notification data
-            
-        Common events:
-        - subscriptionRemoved: Subscription was deleted or expired
-        - reauthorizationRequired: Token needs to be refreshed
-        """
+        """Handle subscription lifecycle events from Microsoft Graph."""
         event_type = lifecycle_event.get('lifecycleEvent')
         subscription_id = lifecycle_event.get('subscriptionId')
         
