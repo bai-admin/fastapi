@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     azure_tenant_id: str
     
     # Base URL configuration with Railway support
-    app_base_url: str = None  # Will be set based on environment
+    app_base_url: str = "http://localhost:8000"  # Default to local development URL
     
     # Other settings
     log_file: str = "search_results.log"
@@ -43,7 +43,6 @@ class Settings(BaseSettings):
             logger.info(f"Using Railway domain for {env_name} environment: {self.app_base_url}")
         else:
             # Local development
-            self.app_base_url = "http://localhost:8000"
             logger.info("Using local development URL: http://localhost:8000")
             
         # Log environment info
