@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Depends, HTTPException, Response, Backgrou
 from fastapi.responses import JSONResponse, RedirectResponse
 from app.services.o365_service import O365Service, O365Config
 from app.config import Settings, get_settings
-from typing import Annotated, Optional, Dict, Any, AsyncGenerator, Union
+from typing import Annotated, Optional, Dict, Any, AsyncGenerator, Union, List
 from functools import lru_cache
 import os
 import json
@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Background task state
-subscription_check_task = None
+subscription_check_task: Optional[asyncio.Task[None]] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -130,7 +130,7 @@ def get_o365_service(settings: Annotated[Settings, Depends(get_settings)]) -> O3
 @app.get("/search/messages")
 async def search_messages_endpoint(
     o365_service: Annotated[O365Service, Depends(get_o365_service)]
-) -> Union[JSONResponse, RedirectResponse]:
+) -> Response:
     """
     Search for recent messages in O365 mailbox.
     If not authenticated, redirects to Microsoft login.
